@@ -98,6 +98,13 @@ type family Substack n ts f where
 -- | Type level natural numbers.
 data N = S N | Z
 
+-- | Greater than constraint.
+class (n :: N) > (m :: N)
+
+instance 'S n > 'Z
+
+instance n > m => 'S n > m
+
 -- | A type family used to lift substacks up into the full 'Stack'
 -- computation.
 class Uplift n ts f where
@@ -124,5 +131,5 @@ type family IndexIn t ts where
 Lifts a substack, or a suffix, of the 'Stack' all the way up into the 'Stack' computation.
 Expected to be used with TypeApplications.
 -}
-substack :: forall t ts f a. Uplift (IndexIn t ts) ts f => Substack (IndexIn t ts) ts f a -> Stack ts f a
-substack = uplift @(IndexIn t ts) @ts @f @a
+liftSubstack :: forall t ts f a. Uplift (IndexIn t ts) ts f => Substack (IndexIn t ts) ts f a -> Stack ts f a
+liftSubstack = uplift @(IndexIn t ts) @ts @f @a
