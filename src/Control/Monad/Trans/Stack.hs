@@ -1,3 +1,6 @@
+{-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
@@ -24,8 +27,7 @@ module Control.Monad.Trans.Stack where
 import GHC.TypeLits (Nat, type (+), type (-), ErrorMessage(..), TypeError)
 import Data.Coerce (coerce)
 import Control.Monad.Trans (MonadTrans(lift))
-import Control.Monad.Writer (WriterT, tell)
-import Control.Monad.State (StateT, get)
+import Control.Monad.Reader(ReaderT(..))
 
 {- |
 A computation consisting of a stack of monad transformers and a base monad.
@@ -108,10 +110,10 @@ instance n > m => 'S n > m
 -- | A type family used to lift substacks up into the full 'Stack'
 -- computation.
 class Uplift n ts f where
-  uplift :: Substack n ts f a -> Stack ts f a
+  liftSubstack :: Substack n ts f a -> Stack ts f a
 
 instance Uplift 'Z (t ': ts) f where
-  uplift fa = Stack fa
+  liftSubstack fa = Stack fa
 
 instance
   ( MonadTrans t
@@ -119,7 +121,7 @@ instance
   , Monad (Stack ts f)
   , Uplift n ts f
   ) => Uplift ('S n) (t ': ts) f where
-  uplift fa = Stack $ lift (uplift @n fa)
+  liftSubstack fa = Stack $ lift (liftSubstack @n fa)
 
 -- | Computes the index of an item in a type level list.
 type family IndexIn t ts where
@@ -131,5 +133,42 @@ type family IndexIn t ts where
 Lifts a substack, or a suffix, of the 'Stack' all the way up into the 'Stack' computation.
 Expected to be used with TypeApplications.
 -}
-liftSubstack :: forall t ts f a. Uplift (IndexIn t ts) ts f => Substack (IndexIn t ts) ts f a -> Stack ts f a
-liftSubstack = uplift @(IndexIn t ts) @ts @f @a
+uplift :: forall t ts f a. Uplift (IndexIn t ts) ts f => Substack (IndexIn t ts) ts f a -> Stack ts f a
+uplift = liftSubstack @(IndexIn t ts) @ts @f @a
+
+-- | A 'Runner' for a stack of transformers in an arbitrary monad.
+newtype Runner ts = Runner (forall f a. Monad f => Stack ts f a -> f a)
+
+-- | Laws:
+-- (runner >>= \phi -> run phi (x >>= f)) == (runner >>= \phi -> run phi x >>= run phi f)
+class WithRunner ts where
+  runner :: (Monad f, Monad (Stack ts f)) => Stack ts f (Runner ts)
+  runner = withRunner pure
+  withRunner :: (Monad f, Monad (Stack ts f)) => (Runner ts -> Stack ts f a) -> Stack ts f a
+  withRunner = (runner >>=)
+
+-- | The class of 'Representable' transformers. Basically, these can be
+-- constant size containers or functions, or arbitrary combination of the two.
+class Representable t where
+  type Rep t
+  tabulate :: (Rep t -> f a) -> t f a
+  index :: t f a -> Rep t -> f a
+
+instance Representable (ReaderT r) where
+  type Rep (ReaderT r) = r
+  tabulate = ReaderT 
+  index = runReaderT
+
+instance WithRunner '[] where
+  runner = pure $ Runner runStack
+
+instance (Representable t, WithRunner ts, forall f. Monad f => Monad (t f), forall f. Monad f => Monad (Stack ts f), MonadTrans t) => WithRunner (t ': ts) where
+  runner = do
+    phi <- Stack (lift runner)
+    Stack do
+      rep <- tabulate pure
+      pure (Runner $ \action -> phi `run` index (runStack action) rep)
+
+-- | Run a stack with a 'Runner'
+run :: Monad f => Runner ts -> Stack ts f a -> f a
+run (Runner phi) stack = phi stack

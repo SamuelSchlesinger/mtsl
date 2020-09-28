@@ -1,7 +1,7 @@
 cabal-version:       2.4
 
 name:                mtsl
-version:             0.1.0.0
+version:             0.2.0.0
 synopsis:            Reified monad transformer stacks
 description:         Reified monad transformer stacks.
 homepage:            https://github.com/SamuelSchlesinger/mtsl
